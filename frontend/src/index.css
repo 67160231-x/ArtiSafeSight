@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-base-950 text-slate-200 font-body antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #1f2c3e;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pulse-dot {
+  box-shadow: 0 0 0 0 rgba(62, 230, 196, 0.6);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(62, 230, 196, 0.5); }
+  70% { box-shadow: 0 0 0 8px rgba(62, 230, 196, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(62, 230, 196, 0); }
+}
