@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme tokens. Every Tailwind color in tailwind.config.js resolves to one
+   of these "R G B" triplets, so toggling [data-theme] on <html> re-themes
+   the whole app without touching any component's className. */
+:root,
+[data-theme="dark"] {
+  --color-base-950: 5 8 13;
+  --color-base-900: 10 15 24;
+  --color-base-850: 13 20 32;
+  --color-base-800: 17 26 40;
+  --color-base-700: 24 34 51;
+  --color-base-600: 36 48 68;
+
+  --color-cyan-accent: 62 230 196;
+  --color-safe: 62 207 142;
+
+  --color-alert-critical: 239 74 74;
+  --color-alert-high: 240 166 59;
+  --color-alert-medium: 240 166 59;
+  --color-alert-low: 240 212 59;
+
+  --color-ink: 255 255 255;
+  --color-slate-200: 226 232 240;
+  --color-slate-300: 203 213 225;
+  --color-slate-400: 148 163 184;
+  --color-slate-500: 100 116 139;
+  --color-slate-600: 71 85 105;
+
+  --scrollbar-thumb: #1f2c3e;
+}
+
+[data-theme="light"] {
+  --color-base-950: 244 246 248;
+  --color-base-900: 255 255 255;
+  --color-base-850: 248 250 252;
+  --color-base-800: 238 241 245;
+  --color-base-700: 221 227 234;
+  --color-base-600: 199 207 217;
+
+  --color-cyan-accent: 12 140 118;
+  --color-safe: 22 142 94;
+
+  --color-alert-critical: 217 45 45;
+  --color-alert-high: 180 108 15;
+  --color-alert-medium: 180 108 15;
+  --color-alert-low: 150 120 10;
+
+  --color-ink: 11 18 32;
+  --color-slate-200: 30 41 59;
+  --color-slate-300: 51 65 85;
+  --color-slate-400: 71 85 105;
+  --color-slate-500: 100 116 139;
+  --color-slate-600: 148 163 184;
+
+  --scrollbar-thumb: #cbd5e1;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-base-950 text-slate-200 font-body antialiased;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pulse-dot {
+  box-shadow: 0 0 0 0 rgba(62, 230, 196, 0.6);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(62, 230, 196, 0.5); }
+  70% { box-shadow: 0 0 0 8px rgba(62, 230, 196, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(62, 230, 196, 0); }
+}
