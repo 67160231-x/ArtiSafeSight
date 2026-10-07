@@ -12,12 +12,12 @@ import {
 
 const NAV_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "cameras", label: "Live Cameras", icon: Video, badge: "06" },
-  { id: "alerts", label: "Alert History", icon: History, badge: "24" },
+  { id: "cameras", label: "Live Cameras", icon: Video },
+  { id: "alerts", label: "Alert History", icon: History },
   { id: "settings", label: "System Settings", icon: Settings }
 ];
 
-export default function Sidebar({ active, onNavigate, forceVisible = false }) {
+export default function Sidebar({ active, onNavigate, forceVisible = false, badges = {}, lastSync = null }) {
   const [helpOpen, setHelpOpen] = useState(false);
 
   return (
@@ -50,8 +50,9 @@ export default function Sidebar({ active, onNavigate, forceVisible = false }) {
       </div>
 
       <nav className="flex-1 px-3 space-y-1">
-        {NAV_ITEMS.map(({ id, label, icon: Icon, badge }) => {
+        {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
           const isActive = active === id;
+          const badge = badges[id];
           return (
             <button
               key={id}
@@ -66,7 +67,7 @@ export default function Sidebar({ active, onNavigate, forceVisible = false }) {
                 <Icon size={16} strokeWidth={2} />
                 {label}
               </span>
-              {badge && (
+              {badge != null && badge !== "" && (
                 <span
                   className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
                     isActive ? "bg-cyan-accent/20 text-cyan-accent" : "bg-base-800 text-slate-500"
@@ -90,7 +91,7 @@ export default function Sidebar({ active, onNavigate, forceVisible = false }) {
         <div className="flex items-center gap-2 text-xs text-safe">
           <span className="h-1.5 w-1.5 rounded-full bg-safe" />
           All systems operational
-          <span className="text-slate-600 ml-auto">Last sync 12 sec ago</span>
+          <span className="text-slate-600 ml-auto">{lastSync ? `Last sync ${lastSync}` : "Syncing..."}</span>
         </div>
 
         {helpOpen && (

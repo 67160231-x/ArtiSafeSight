@@ -18,34 +18,68 @@ const PAGE_TITLES = {
   settings: "System settings"
 };
 
+function greeting() {
+  const h = new Date().getHours();
+  return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+}
+
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token"));
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "null");
+    } catch {
+      return null;
+    }
+  });
   const [active, setActive] = useState("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [cameras, setCameras] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [lastSyncAt, setLastSyncAt] = useState(null);
+  const [, setTick] = useState(0);
   const [error, setError] = useState(null);
+  const [settings, setSettings] = useState({ blur: false });
 
   async function loadAll() {
     try {
       setError(null);
-      const [camerasRes, alertsRes, statsRes] = await Promise.all([
+      const [camerasRes, alertsRes, statsRes, settingsRes] = await Promise.all([
         api.getCameras(),
         api.getAlerts(),
-        api.getStats()
+        api.getStats(),
+        api.getSettings().catch(() => null)
       ]);
+      if (settingsRes) setSettings(settingsRes);
       setCameras(camerasRes);
       setAlerts(alertsRes);
       setStats(statsRes);
+      setLastSyncAt(Date.now());
     } catch (err) {
       setError(err.message || "Could not reach the backend.");
     } finally {
       setLoading(false);
     }
   }
+
+  // re-render every 5s so "Last sync Ns ago" stays fresh
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  const syncAgo = lastSyncAt
+    ? (() => {
+        const sec = Math.max(0, Math.round((Date.now() - lastSyncAt) / 1000));
+        return sec < 60 ? `${sec} sec ago` : `${Math.round(sec / 60)} min ago`;
+      })()
+    : null;
+  const navBadges = {
+    cameras: cameras.length ? String(cameras.filter((c) => c.detections.length > 0).length).padStart(2, "0") : "",
+    alerts: alerts.length ? String(alerts.filter((a) => !a.acknowledged).length) : ""
+  };
 
   useEffect(() => {
     if (!token) return;
@@ -55,12 +89,14 @@ export default function App() {
   }, [token]);
 
   function handleLoginSuccess(newToken, newUser) {
+    localStorage.setItem("user", JSON.stringify(newUser));
     setToken(newToken);
     setUser(newUser);
   }
 
   function handleLogout() {
     localStorage.removeItem("token");
+    localStorage.removeItem("user");
     setToken(null);
     setUser(null);
   }
@@ -81,7 +117,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-base-950">
-      <Sidebar active={active} onNavigate={setActive} />
+      <Sidebar active={active} onNavigate={setActive} badges={navBadges} lastSync={syncAgo} />
 
       {/* Mobile slide-over nav */}
       {mobileNavOpen && (
@@ -95,6 +131,8 @@ export default function App() {
                 setMobileNavOpen(false);
               }}
               forceVisible
+              badges={navBadges}
+              lastSync={syncAgo}
             />
           </div>
         </div>
@@ -115,7 +153,7 @@ export default function App() {
           {error && (
             <div className="mb-4 flex items-center gap-2 rounded-lg border border-alert-critical/30 bg-alert-critical/10 px-4 py-2.5 text-xs text-alert-critical">
               <WifiOff size={14} />
-              Can't reach the backend at /api — is the server running? ({error})
+              Can't reach the backend — if it is hosted on Render's free plan it may be waking up (up to ~50 s). Retrying every 15 s. ({error})
             </div>
           )}
 
@@ -127,7 +165,7 @@ export default function App() {
                     <span className="h-1.5 w-1.5 rounded-full bg-cyan-accent pulse-dot" /> LIVE MONITORING
                   </p>
                   <h1 className="text-2xl font-display font-semibold text-white mt-1">
-                    Good morning, {user?.name || "Jordan"}
+                    {greeting()}, {user?.name || "there"}
                   </h1>
                   <p className="text-sm text-slate-500 mt-0.5">
                     Here's what's happening across your site right now.
@@ -150,20 +188,20 @@ export default function App() {
 
               <div className="mt-6 flex flex-col xl:flex-row gap-4 items-start">
                 <div className="flex-1 min-w-0">
-                  <CameraGrid cameras={cameras} loading={loading} />
+                  <CameraGrid cameras={cameras} loading={loading} blurFaces={settings.blur} />
                 </div>
                 <AlertsPanel alerts={alerts} onAcknowledge={handleAcknowledge} onNavigate={setActive} />
               </div>
             </>
           )}
 
-          {active === "cameras" && <CamerasPage cameras={cameras} loading={loading} />}
+          {active === "cameras" && <CamerasPage cameras={cameras} loading={loading} onRefresh={loadAll} blurFaces={settings.blur} />}
 
           {active === "alerts" && (
             <AlertsHistoryPage alerts={alerts} onAcknowledge={handleAcknowledge} />
           )}
 
-          {active === "settings" && <SettingsPage />}
+          {active === "settings" && <SettingsPage onChange={setSettings} />}
         </main>
 
         <footer className="flex items-center justify-between px-6 py-2.5 border-t border-base-700/60 text-[11px] text-slate-600">

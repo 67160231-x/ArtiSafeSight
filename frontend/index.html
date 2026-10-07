@@ -9,6 +9,13 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+    <script>
+      // set the theme before first paint so there is no dark->light flash
+      try {
+        var t = localStorage.getItem("artisafesight-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

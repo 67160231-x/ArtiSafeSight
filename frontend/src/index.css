@@ -2,12 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme tokens (space-separated RGB so Tailwind opacity modifiers keep working). */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --white: 255 255 255;
+  --slate-200: 226 232 240;
+  --slate-300: 203 213 225;
+  --slate-400: 148 163 184;
+  --slate-500: 100 116 139;
+  --slate-600: 71 85 105;
+  --base-950: 5 8 13;
+  --base-900: 10 15 24;
+  --base-850: 13 20 32;
+  --base-800: 17 26 40;
+  --base-700: 24 34 51;
+  --base-600: 36 48 68;
+  --accent: 62 230 196;
+  --critical: 239 74 74;
+  --high: 240 166 59;
+  --low: 240 212 59;
+  --safe: 62 207 142;
+  --scroll: #1f2c3e;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --white: 11 18 32;
+  --slate-200: 15 23 42;
+  --slate-300: 30 41 59;
+  --slate-400: 71 85 105;
+  --slate-500: 100 116 139;
+  --slate-600: 148 163 184;
+  --base-950: 243 246 249;
+  --base-900: 255 255 255;
+  --base-850: 241 245 249;
+  --base-800: 232 238 244;
+  --base-700: 219 227 236;
+  --base-600: 195 207 219;
+  --accent: 13 148 136;
+  --critical: 220 38 38;
+  --high: 217 119 6;
+  --low: 202 138 4;
+  --safe: 5 150 105;
+  --scroll: #c3cfdb;
+}
+
 html, body, #root {
   height: 100%;
 }
 
 body {
   @apply bg-base-950 text-slate-200 font-body antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 ::-webkit-scrollbar {
@@ -15,7 +62,7 @@ body {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1f2c3e;
+  background: var(--scroll);
   border-radius: 8px;
 }
 ::-webkit-scrollbar-track {
@@ -30,4 +77,12 @@ body {
   0% { box-shadow: 0 0 0 0 rgba(62, 230, 196, 0.5); }
   70% { box-shadow: 0 0 0 8px rgba(62, 230, 196, 0); }
   100% { box-shadow: 0 0 0 0 rgba(62, 230, 196, 0); }
+}
+
+/* privacy blur drawn over detected heads */
+.face-blur {
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  background: rgba(120, 130, 140, 0.25);
+  border-radius: 9999px;
 }

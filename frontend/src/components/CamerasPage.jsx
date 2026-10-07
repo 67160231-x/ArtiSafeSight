@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { Loader2, ScanSearch } from "lucide-react";
+import { api } from "../api.js";
 import CameraCard from "./CameraCard.jsx";
-import AnalyzePhoto from "./AnalyzePhoto.jsx";
+import VideoAnalyzer from "./VideoAnalyzer.jsx";
 
 const FILTERS = ["All", "Live", "Clear", "Alerts"];
 
@@ -12,8 +14,19 @@ function matchesFilter(camera, filter) {
   return true;
 }
 
-export default function CamerasPage({ cameras, loading }) {
+export default function CamerasPage({ cameras, loading, onRefresh, blurFaces = false }) {
   const [filter, setFilter] = useState("All");
+  const [scanning, setScanning] = useState(false);
+
+  async function rescan() {
+    setScanning(true);
+    try {
+      await api.scanCameras();
+      await onRefresh?.();
+    } finally {
+      setScanning(false);
+    }
+  }
   const filtered = cameras.filter((c) => matchesFilter(c, filter));
 
   return (
@@ -23,9 +36,17 @@ export default function CamerasPage({ cameras, loading }) {
           <div>
             <h1 className="text-2xl font-display font-semibold text-white">Live cameras</h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              All {cameras.length} connected feeds with real-time AI detection.
+              All {cameras.length} connected feeds, analysed by the PPE detection model.
             </p>
           </div>
+          <button
+            onClick={rescan}
+            disabled={scanning}
+            className="flex items-center gap-1.5 rounded-lg bg-cyan-accent text-base-950 font-medium px-3 py-2 text-xs hover:bg-cyan-accent/90 transition-colors disabled:opacity-60"
+          >
+            {scanning ? <Loader2 size={13} className="animate-spin" /> : <ScanSearch size={13} />}
+            {scanning ? "Scanning..." : "Re-scan all cameras"}
+          </button>
         </div>
 
         <div className="flex items-center gap-1.5 mt-3 mb-3">
@@ -57,13 +78,13 @@ export default function CamerasPage({ cameras, loading }) {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filtered.map((camera) => (
-              <CameraCard key={camera.id} camera={camera} />
+              <CameraCard key={camera.id} camera={camera} blurFaces={blurFaces} />
             ))}
           </div>
         )}
       </div>
 
-      <AnalyzePhoto />
+      <VideoAnalyzer cameras={cameras} blurFaces={blurFaces} onLogged={onRefresh} />
     </div>
   );
 }

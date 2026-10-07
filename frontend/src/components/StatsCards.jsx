@@ -56,7 +56,11 @@ export default function StatsCards({ stats, onNavigate }) {
         iconColor="text-alert-critical"
         label="Daily warnings"
         value={stats.dailyWarnings.value}
-        delta={`${stats.dailyWarnings.deltaVsYesterday}% vs yesterday`}
+        delta={
+          stats.dailyWarnings.deltaVsYesterday == null
+            ? null
+            : `${stats.dailyWarnings.deltaVsYesterday}% vs yesterday`
+        }
         deltaGood
         onClick={() => onNavigate?.("alerts")}
       />
@@ -66,7 +70,11 @@ export default function StatsCards({ stats, onNavigate }) {
         iconColor="text-safe"
         label="Safety compliance rate"
         value={`${stats.complianceRate.value}%`}
-        delta={`+${stats.complianceRate.deltaVsYesterday}% vs yesterday`}
+        delta={
+          stats.complianceRate.deltaVsYesterday == null
+            ? null
+            : `${stats.complianceRate.deltaVsYesterday > 0 ? "+" : ""}${stats.complianceRate.deltaVsYesterday}% vs yesterday`
+        }
         deltaGood
         onClick={() => onNavigate?.("settings")}
       />

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Search, Bell, Settings2, Menu, LogOut } from "lucide-react";
 
 export default function TopBar({
-  userName = "Jordan Davis",
+  userName = "Signed in",
   userRole = "Safety Director",
   title = "Safety overview",
   onMenuClick,

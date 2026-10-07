@@ -1,3 +1,5 @@
+import DetectionImage from "./DetectionImage.jsx";
+
 const SEVERITY_STYLES = {
   critical: { border: "border-alert-critical", text: "text-alert-critical", bg: "bg-alert-critical" },
   high: { border: "border-alert-high", text: "text-alert-high", bg: "bg-alert-high" },
@@ -5,40 +7,58 @@ const SEVERITY_STYLES = {
   low: { border: "border-alert-low", text: "text-alert-low", bg: "bg-alert-low" }
 };
 
-export default function CameraCard({ camera }) {
+export default function CameraCard({ camera, blurFaces = false }) {
   const hasAlerts = camera.detections.length > 0;
   const isClear = camera.status === "clear";
 
   return (
     <div className="group relative rounded-xl overflow-hidden border border-base-700/60 bg-base-900">
-      <div className="relative aspect-video bg-base-800">
-        <img
-          src={`/cameras/${camera.image}`}
-          alt={camera.name}
-          className="h-full w-full object-cover opacity-90"
-          loading="lazy"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/30" />
+      <DetectionImage
+        src={`/cameras/${camera.image}`}
+        alt={camera.name}
+        width={camera.imageWidth}
+        height={camera.imageHeight}
+        imgClassName="opacity-90"
+        frame={
+          <>
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30" />
 
-        {/* Live / status pill */}
-        <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 rounded-md bg-black/50 px-2 py-1 text-[10px] font-mono backdrop-blur-sm">
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${isClear ? "bg-safe" : "bg-alert-critical pulse-dot"}`}
-          />
-          <span className={isClear ? "text-safe" : "text-alert-critical"}>
-            {isClear ? "Clear" : "Live"}
-          </span>
-        </div>
+            {/* Live / status pill */}
+            <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 rounded-md bg-black/50 px-2 py-1 text-[10px] font-mono backdrop-blur-sm">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${isClear ? "bg-safe" : "bg-alert-critical pulse-dot"}`}
+              />
+              <span className={isClear ? "text-safe" : "text-alert-critical"}>
+                {isClear ? "Clear" : "Live"}
+              </span>
+            </div>
 
-        {camera.timestamp && (
-          <div className="absolute top-2.5 right-2.5 rounded-md bg-black/50 px-2 py-1 text-[10px] font-mono text-slate-300 backdrop-blur-sm">
-            {camera.timestamp}
-          </div>
-        )}
+            {camera.timestamp && (
+              <div className="absolute top-2.5 right-2.5 rounded-md bg-black/50 px-2 py-1 text-[10px] font-mono text-[#cbd5e1] backdrop-blur-sm">
+                {camera.timestamp}
+              </div>
+            )}
+          </>
+        }
+      >
+        {/* privacy: blur detected heads when the setting is on */}
+        {blurFaces &&
+          (camera.faces || []).map((f, i) => (
+            <div
+              key={`f${i}`}
+              className="face-blur absolute"
+              style={{ left: `${f.x}%`, top: `${f.y}%`, width: `${f.w}%`, height: `${f.h}%` }}
+            />
+          ))}
 
-        {/* Detection bounding boxes */}
-        {camera.detections.map((d) => {
+        {/* Detection bounding boxes (drawn in the image's own coordinate space) */}
+        {camera.detections.map((d, idx) => {
           const style = SEVERITY_STYLES[d.severity] || SEVERITY_STYLES.medium;
+          const labelInside = (d.box?.y ?? 15) < 12;
+          // two violations on the same person share one box -> stack their labels
+          const sameBoxBefore = camera.detections
+            .slice(0, idx)
+            .filter((o) => o.box && d.box && o.box.x === d.box.x && o.box.y === d.box.y && o.box.w === d.box.w).length;
           return (
             <div
               key={d.id}
@@ -51,14 +71,15 @@ export default function CameraCard({ camera }) {
               }}
             >
               <span
-                className={`absolute -top-6 left-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium text-black ${style.bg}`}
+                className={`absolute ${labelInside ? "top-0" : "-top-6"} left-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium text-black ${style.bg}`}
+                style={{ transform: `translateY(${(labelInside ? 1 : -1) * sameBoxBefore * 105}%)` }}
               >
                 {d.label}
               </span>
             </div>
           );
         })}
-      </div>
+      </DetectionImage>
 
       <div className="flex items-center justify-between px-3 py-2.5">
         <div>

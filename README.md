@@ -36,24 +36,33 @@ Data currently lives in `backend/data/mockData.js` as an in-memory store —
 swap that one module for a real database layer (Postgres, Mongo, etc.) and
 none of the route files need to change.
 
-## Real PPE detection data (not random mock numbers)
+## PPE detection (native Node, ONNX)
 
-The 8 camera tiles use **real photos and real ground-truth labels** pulled
-from the "PPE Detection v14" Roboflow dataset (YOLOv8 format, classes:
-`Gloves, Hard_hat, Mask, Person, Safety_boots, Vest`). For each photo, a
-simple compliance rule (see `ml/analyze_dataset.py`) checks whether a
-detected person also has an overlapping Hard_hat/Vest box in the same frame
-— if not, that's a violation, positioned at the person's real bounding box.
-So every bounding box you see on a camera tile is accurate to that photo.
+`backend/services/detector.js` runs two YOLOv8-nano ONNX models with `onnxruntime-node`:
+the friend-trained PPE model (`Hard_hat`, `Vest`) and stock yolov8n for `Person`.
+A person without an overlapping hat/vest is a violation. On boot the 8 camera frames in
+`backend/assets/cameras` are scanned, which produces the camera boxes and alerts.
+Peak RAM measured ~220 MB (12 MP upload + concurrent requests), so it fits Render's 512 MB.
+`POST /api/detect` (multipart `image`, optional `cameraId`) analyses an uploaded photo.
 
-## Live "Analyze a photo" feature
+## Features added in this version
 
-On the **Live Cameras** page there's an "Analyze a photo" panel: upload any
-image and it's sent to `POST /api/detect`, which shells out to
-`ml/detect_image.py` and runs a trained YOLOv8 model on it. Until a model is
-trained (see `ml/README.md`), this correctly reports "no trained model
-loaded yet" instead of pretending to detect anything — plug in
-`ml/model/best.pt` and it starts doing real inference with zero code changes.
+- **Analyze a video** (Live cameras page): the browser decodes the video, samples up to 90 frames and sends
+  each frame to `POST /api/detect`; boxes follow the video while it plays and a timeline shows when
+  violations happen. The video file itself is never uploaded, so the server needs no ffmpeg and its RAM stays flat.
+- **Light / dark theme** (Settings → Appearance), remembered per device.
+- **Blur worker faces**: blurs the head area (top ~22% of each person box) over camera feeds and the video player.
+- **LINE notifications**: uses the LINE Messaging API (LINE Notify was shut down in 2025). Set
+  `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_TO` on the server; Settings has a "Send test message" button.
+- Recent violations: ticking the checkbox acknowledges the alert and removes it from the panel (it stays in Alert history).
+
+## Deploy backend on Render
+
+Use `render.yaml` (Root Directory `backend`, start `node --max-old-space-size=300 server.js`)
+and set `CORS_ORIGIN`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. `onnxruntime-node` is pinned to 1.20.1
+on purpose (newer versions download CUDA binaries at install). Frontend: set `VITE_API_URL`
+to `https://<service>.onrender.com/api`. Check `/api/health` for model + memory status.
+Free plan sleeps when idle (first request ~50 s) and loses users on restart, hence `ADMIN_*`.
 
 ## Run the frontend
 

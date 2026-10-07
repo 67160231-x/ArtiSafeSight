@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getStats } from "../data/mockData.js";
+import { getStats } from "../data/store.js";
 
 const router = Router();
 

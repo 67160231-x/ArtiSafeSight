@@ -1,28 +1,18 @@
 /** @type {import('tailwindcss').Config} */
+// Colours are CSS variables (see src/index.css) so the light/dark toggle can swap them.
+const v = (name) => `rgb(var(--${name}) / <alpha-value>)`;
+
 export default {
   content: ["./index.html", "./src/**/*.{js,jsx}"],
   theme: {
     extend: {
       colors: {
-        // ArtiSafeSight safety-tech palette
-        base: {
-          950: "#05080d",
-          900: "#0a0f18",
-          850: "#0d1420",
-          800: "#111a28",
-          700: "#182233",
-          600: "#243044"
-        },
-        cyan: {
-          accent: "#3ee6c4"
-        },
-        alert: {
-          critical: "#ef4a4a",
-          high: "#f0a63b",
-          medium: "#f0a63b",
-          low: "#f0d43b"
-        },
-        safe: "#3ecf8e"
+        white: v("white"),
+        slate: { 200: v("slate-200"), 300: v("slate-300"), 400: v("slate-400"), 500: v("slate-500"), 600: v("slate-600") },
+        base: { 950: v("base-950"), 900: v("base-900"), 850: v("base-850"), 800: v("base-800"), 700: v("base-700"), 600: v("base-600") },
+        cyan: { accent: v("accent") },
+        alert: { critical: v("critical"), high: v("high"), medium: v("high"), low: v("low") },
+        safe: v("safe")
       },
       fontFamily: {
         display: ["'Space Grotesk'", "sans-serif"],

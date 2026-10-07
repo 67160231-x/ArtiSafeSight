@@ -1,84 +1,73 @@
 import { Router } from "express";
 import multer from "multer";
-import { spawn } from "child_process";
-import fs from "fs";
-import path from "path";
-import os from "os";
-import { fileURLToPath } from "url";
-import { addDetection } from "../data/mockData.js";
+import { detect, status, BusyError } from "../services/detector.js";
+import { addDetection, getCamera, getSettings } from "../data/store.js";
+import { rateLimit } from "../middleware/rateLimit.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ML_DIR = path.join(__dirname, "..", "..", "ml");
-const WEIGHTS_PATH = path.join(ML_DIR, "model", "best.pt");
-const SCRIPT_PATH = path.join(ML_DIR, "detect_image.py");
+const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 8);
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB
+  limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) => {
+    if (!/^image\/(jpeg|png|webp|bmp|gif|tiff)$/i.test(file.mimetype)) {
+      return cb(Object.assign(new Error("Only JPEG, PNG, WebP, BMP, GIF or TIFF images are accepted."), { status: 415 }));
+    }
+    cb(null, true);
+  }
 });
 
 const router = Router();
 
-function runInference(imagePath) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("python3", [
-      SCRIPT_PATH,
-      "--weights", WEIGHTS_PATH,
-      "--source", imagePath
-    ]);
-
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d) => (stdout += d.toString()));
-    proc.stderr.on("data", (d) => (stderr += d.toString()));
-    proc.on("close", (code) => {
-      if (code !== 0) return reject(new Error(stderr || `Inference exited with code ${code}`));
-      try {
-        resolve(JSON.parse(stdout));
-      } catch (err) {
-        reject(new Error(`Could not parse inference output: ${stdout}`));
-      }
-    });
-    proc.on("error", (err) => reject(err));
+function singleUpload(req, res, next) {
+  upload.single("image")(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({ error: `Image too large (max ${MAX_UPLOAD_MB} MB).` });
+    }
+    return res.status(err.status || 400).json({ error: err.message });
   });
 }
 
-// POST /api/detect — upload a photo, run the trained YOLOv8 PPE model on it.
-// Falls back to a clear "model not trained yet" response until
-// ml/model/best.pt exists (see ml/README.md).
-router.post("/", upload.single("image"), async (req, res) => {
+// POST /api/detect  (multipart: image, optional cameraId)
+// Runs the PPE model (Hard_hat, Vest) + person detector and returns
+// { raw_detections, violations, summary, meta }.
+router.post("/", rateLimit({ windowMs: 60_000, max: Number(process.env.DETECT_RATE_PER_MIN || 180), name: "detect" }), singleUpload, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No image uploaded (field name: 'image')" });
   }
 
-  if (!fs.existsSync(WEIGHTS_PATH)) {
-    return res.status(503).json({
-      error: "No trained model found yet.",
-      detail:
-        "Train one with ml/train_model.py on a GPU machine, then copy the " +
-        "weights to ml/model/best.pt — see ml/README.md.",
-      modelReady: false
-    });
+  const cameraId = req.body?.cameraId;
+  if (cameraId && !getCamera(cameraId)) {
+    return res.status(404).json({ error: "Camera not found" });
   }
 
-  const tmpPath = path.join(os.tmpdir(), `upload-${Date.now()}${path.extname(req.file.originalname) || ".jpg"}`);
-  fs.writeFileSync(tmpPath, req.file.buffer);
-
+  const s = getSettings();
   try {
-    const result = await runInference(tmpPath);
+    const result = await detect(req.file.buffer, { hardhat: s.hardhat, vest: s.vest });
 
-    // Optionally log violations onto a camera's feed if cameraId was passed
-    if (req.body.cameraId && Array.isArray(result.violations)) {
-      for (const v of result.violations) {
-        addDetection(req.body.cameraId, v);
-      }
+    if (cameraId) {
+      for (const v of result.violations) addDetection(cameraId, v);
     }
-
     res.json({ modelReady: true, ...result });
   } catch (err) {
-    res.status(500).json({ error: "Inference failed", detail: err.message });
-  } finally {
-    fs.unlink(tmpPath, () => {});
+    if (err instanceof BusyError) {
+      res.set("Retry-After", "3");
+      return res.status(429).json({ error: err.message });
+    }
+    if (err.code === "NOT_READY") {
+      return res.status(503).json({
+        modelReady: false,
+        error: "Model is not loaded.",
+        detail: status().error || "The detector is still starting up — try again in a few seconds."
+      });
+    }
+    // sharp: unsupported / corrupt image, or too many pixels
+    if (/Input|pixel|unsupported|corrupt|VipsJpeg|bad seek|decode/i.test(err.message)) {
+      return res.status(400).json({ error: "Could not read that image. Try a different JPEG or PNG." });
+    }
+    console.error("[detect] inference failed:", err);
+    res.status(500).json({ error: "Inference failed" });
   }
 });
 

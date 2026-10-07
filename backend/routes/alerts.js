@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { listAlerts, acknowledgeAlert } from "../data/mockData.js";
+import { listAlerts, acknowledgeAlert, getSettings } from "../data/store.js";
+import { pushLine } from "../services/line.js";
 
 const router = Router();
 
@@ -14,6 +15,19 @@ router.patch("/:id/acknowledge", (req, res) => {
   const alert = acknowledgeAlert(req.params.id);
   if (!alert) return res.status(404).json({ error: "Alert not found" });
   res.json(alert);
+});
+
+// POST /api/alerts/notify — called by the web app after it analysed a photo/video that
+// contained critical violations. Sends a LINE message only if the LINE toggle is ON.
+router.post("/notify", async (req, res) => {
+  if (!getSettings().line) return res.json({ sent: false, reason: "disabled" });
+  const { title = "PPE violation", detail = "" } = req.body || {};
+  try {
+    const r = await pushLine(`🚨 ArtiSafeSight\n${String(title).slice(0, 200)}\n${String(detail).slice(0, 1500)}`);
+    res.json(r);
+  } catch (e) {
+    res.status(502).json({ sent: false, reason: "network", error: e.message });
+  }
 });
 
 export default router;

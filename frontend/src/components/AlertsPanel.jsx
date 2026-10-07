@@ -13,10 +13,10 @@ const SEVERITY_STYLES = {
 export default function AlertsPanel({ alerts, onAcknowledge, onNavigate }) {
   const [tab, setTab] = useState("All");
 
-  const filtered =
-    tab === "All" ? alerts : alerts.filter((a) => a.severity === tab.toLowerCase());
-
-  const openCount = alerts.filter((a) => !a.acknowledged).length;
+  // acknowledged alerts leave this panel (they stay in Alert history)
+  const open = alerts.filter((a) => !a.acknowledged);
+  const filtered = tab === "All" ? open : open.filter((a) => a.severity === tab.toLowerCase());
+  const openCount = open.length;
 
   return (
     <aside className="w-full xl:w-80 shrink-0 rounded-xl border border-base-700/60 bg-base-900 flex flex-col max-h-[calc(100vh-8rem)]">
@@ -48,7 +48,7 @@ export default function AlertsPanel({ alerts, onAcknowledge, onNavigate }) {
 
       <div className="flex-1 overflow-y-auto divide-y divide-base-700/50">
         {filtered.length === 0 && (
-          <p className="text-xs text-slate-500 px-4 py-6 text-center">No violations in this category.</p>
+          <p className="text-xs text-slate-500 px-4 py-6 text-center">Nothing needs your attention here.</p>
         )}
         {filtered.map((alert) => (
           <div key={alert.id} className="flex items-start gap-2.5 px-4 py-3">
@@ -76,16 +76,14 @@ export default function AlertsPanel({ alerts, onAcknowledge, onNavigate }) {
               <p className="text-[10px] font-mono text-slate-600 mt-0.5">{alert.time}</p>
             </div>
             <button
+              role="checkbox"
+              aria-checked={false}
               onClick={() => onAcknowledge(alert.id)}
-              disabled={alert.acknowledged}
-              title={alert.acknowledged ? "Acknowledged" : "Acknowledge"}
-              className={`h-6 w-6 shrink-0 flex items-center justify-center rounded-full border transition-colors ${
-                alert.acknowledged
-                  ? "border-safe/40 text-safe bg-safe/10"
-                  : "border-base-700 text-slate-500 hover:text-cyan-accent hover:border-cyan-accent/40"
-              }`}
+              title="Mark as reviewed"
+              aria-label={`Mark "${alert.title}" as reviewed`}
+              className="h-5 w-5 shrink-0 flex items-center justify-center rounded border border-base-600 text-transparent hover:border-cyan-accent hover:text-cyan-accent hover:bg-cyan-accent/10 transition-colors"
             >
-              <Check size={12} />
+              <Check size={13} strokeWidth={3} />
             </button>
           </div>
         ))}
