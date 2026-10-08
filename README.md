@@ -51,7 +51,7 @@ Peak RAM measured ~220 MB (12 MP upload + concurrent requests), so it fits Rende
   each frame to `POST /api/detect`; boxes follow the video while it plays and a timeline shows when
   violations happen. The video file itself is never uploaded, so the server needs no ffmpeg and its RAM stays flat.
 - **Light / dark theme** (Settings → Appearance), remembered per device.
-- **Blur worker faces**: blurs the head area (top ~22% of each person box) over camera feeds and the video player.
+- **Blur worker faces**: a real face detector (SCRFD-500M, 2.5 MB ONNX) finds faces; people whose face is too small/turned away fall back to an estimated head box. Drawn as a blur over camera feeds and the video player (the original media is not modified).
 - **LINE notifications**: uses the LINE Messaging API (LINE Notify was shut down in 2025). Set
   `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_TO` on the server; Settings has a "Send test message" button.
 - Recent violations: ticking the checkbox acknowledges the alert and removes it from the panel (it stays in Alert history).

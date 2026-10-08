@@ -3,6 +3,8 @@
 // Two YOLOv8-nano ONNX models run back-to-back on ONE shared 640x640 tensor:
 //   1. ppe_hat_vest_nano.onnx  — the friend-trained PPE model  (Hard_hat, Vest)
 //   2. person_yolov8n.onnx     — stock COCO YOLOv8n, class 0 only (Person)
+//   3. face_scrfd_500m.onnx    — SCRFD-500M face detector (2.5 MB), only used for the
+//                                "blur worker faces" privacy setting
 // A person with no Hard_hat / Vest on their body => compliance violation.
 //
 // Memory design (Render 512 MB):
@@ -28,6 +30,7 @@ const PAD = 114 / 255;
 export const CONFIG = {
   ppeConf: Number(process.env.PPE_CONF || 0.5),
   personConf: Number(process.env.PERSON_CONF || 0.4),
+  faceConf: Number(process.env.FACE_CONF || 0.45),
   iou: Number(process.env.NMS_IOU || 0.6),
   maxQueue: Number(process.env.MAX_INFERENCE_QUEUE || 4),
   maxPixels: Number(process.env.MAX_INPUT_PIXELS || 40_000_000)
@@ -38,7 +41,8 @@ sharp.concurrency(1);
 
 let ppeSession = null;
 let personSession = null;
-let inputName = { ppe: null, person: null };
+let faceSession = null;
+let inputName = { ppe: null, person: null, face: null };
 let ready = false;
 let loadError = null;
 
@@ -55,6 +59,14 @@ const SESSION_OPTS = {
   enableMemPattern: false,
   logSeverityLevel: 3
 };
+
+// SCRFD wants (x*255 - 127.5) / 128 instead of x in [0,1]; use one extra reusable 4.9 MB buffer.
+const faceData = new Float32Array(3 * SIZE * SIZE);
+function faceNorm(tensor) {
+  const src = tensor.data;
+  for (let i = 0; i < src.length; i++) faceData[i] = (src[i] * 255 - 127.5) / 128;
+  return new ort.Tensor("float32", faceData, [1, 3, SIZE, SIZE]);
+}
 
 // ---------- queue (strict concurrency = 1, bounded backlog) ----------
 let tail = Promise.resolve();
@@ -227,7 +239,93 @@ function evaluate(detections, checks) {
   return { people: people.length, hats: hats.length, vests: vests.length, violations };
 }
 
-// Head/face regions for the "blur worker faces" privacy setting.
+// ---------- SCRFD face detector ----------
+// 9 outputs: for strides 8/16/32 -> scores [N,1], boxes [N,4] (distances * stride), keypoints [N,10].
+// N = (640/stride)^2 * 2 anchors. Input is RGB normalised as (x - 127.5) / 128.
+const FACE_STRIDES = [8, 16, 32];
+
+function decodeFaces(outputs, geo, minScore) {
+  const groups = new Map(); // N -> { score, bbox }
+  for (const out of Object.values(outputs)) {
+    const [n, c] = out.dims;
+    if (!groups.has(n)) groups.set(n, {});
+    if (c === 1) groups.get(n).score = out.data;
+    else if (c === 4) groups.get(n).bbox = out.data;
+  }
+
+  const cands = [];
+  for (const stride of FACE_STRIDES) {
+    const g = SIZE / stride;
+    const grp = groups.get(g * g * 2);
+    if (!grp?.score || !grp?.bbox) continue;
+    for (let i = 0; i < g * g * 2; i++) {
+      const score = grp.score[i];
+      if (score < minScore) continue;
+      const loc = i >> 1; // 2 anchors per cell
+      const cx = (loc % g) * stride;
+      const cy = Math.floor(loc / g) * stride;
+      cands.push({
+        score,
+        x1: cx - grp.bbox[i * 4] * stride,
+        y1: cy - grp.bbox[i * 4 + 1] * stride,
+        x2: cx + grp.bbox[i * 4 + 2] * stride,
+        y2: cy + grp.bbox[i * 4 + 3] * stride
+      });
+    }
+  }
+
+  cands.sort((a, b) => b.score - a.score);
+  const kept = [];
+  for (const c of cands) {
+    if (!kept.some((k) => iouOf(k, c) > 0.4)) kept.push(c);
+    if (kept.length >= 30) break;
+  }
+
+  const clamp = (v) => Math.max(0, Math.min(100, v));
+  const round = (v) => Math.round(v * 10) / 10;
+  return kept.map((k) => {
+    // the detector box spans eyebrows→chin; grow it so hair/ears/forehead are covered too
+    const w = k.x2 - k.x1;
+    const h = k.y2 - k.y1;
+    const x1 = clamp(((k.x1 - w * 0.22 - geo.padX) / geo.nw) * 100);
+    const x2 = clamp(((k.x2 + w * 0.22 - geo.padX) / geo.nw) * 100);
+    const y1 = clamp(((k.y1 - h * 0.35 - geo.padY) / geo.nh) * 100);
+    const y2 = clamp(((k.y2 + h * 0.15 - geo.padY) / geo.nh) * 100);
+    return { x: round(x1), y: round(y1), w: round(x2 - x1), h: round(y2 - y1), score: k.score };
+  });
+}
+
+// Combine the face detector with the person boxes so nobody is left unblurred:
+//  1. confident faces (score >= FACE_CONF) are always blurred;
+//  2. a person with no confident face gets the best weak candidate (score >= 0.2) inside
+//     the upper half of their box (profile / tiny faces score low);
+//  3. still nothing and the person is small in the frame (< 60% tall -> far / medium shot,
+//     where a head box derived from the body is reliable): blur an estimated head box.
+//  Large close-ups with no detected face are left alone: nobody is identifiable from there.
+function collectFaces(cands, detections, geo) {
+  const faces = cands.filter((f) => f.score >= CONFIG.faceConf);
+  const people = detections.filter((d) => d.label === "Person" && d.box.h >= 8);
+  const inside = (f, b, topFrac = 1) => {
+    const cx = f.x + f.w / 2;
+    const cy = f.y + f.h / 2;
+    return cx >= b.x && cx <= b.x + b.w && cy >= b.y - 0.05 * b.h && cy <= b.y + b.h * topFrac;
+  };
+  for (const p of people) {
+    if (faces.some((f) => inside(f, p.box, 0.5) && f.w < p.box.w * 1.3)) continue;
+    const weak = cands.filter((f) => f.score < CONFIG.faceConf && inside(f, p.box, 0.5)).sort((a, b) => b.score - a.score)[0];
+    if (weak) {
+      faces.push(weak);
+      continue;
+    }
+    if (p.box.h < 60) {
+      const hats = detections.filter((d) => d.label === "Hard_hat");
+      faces.push(...headRegions([p, ...hats], geo));
+    }
+  }
+  return faces.map(({ x, y, w, h }) => ({ x, y, w, h }));
+}
+
+// FALLBACK (only if the face model failed to load): head regions for the blur setting.
 // The friend's detect_blur.py blurs a fixed 25% strip at the top of every person box. That
 // misses faces in close-ups (head is ~40% of a waist-up box), so here the head size is
 // derived from the person's WIDTH (shoulders ≈ 2 head-widths), clamped to 20-50% of the box,
@@ -281,13 +379,24 @@ export async function loadModels() {
     const t0 = Date.now();
     ppeSession = await ort.InferenceSession.create(path.join(MODELS_DIR, "ppe_hat_vest_nano.onnx"), SESSION_OPTS);
     personSession = await ort.InferenceSession.create(path.join(MODELS_DIR, "person_yolov8n.onnx"), SESSION_OPTS);
-    inputName = { ppe: ppeSession.inputNames[0], person: personSession.inputNames[0] };
+    try {
+      faceSession = await ort.InferenceSession.create(path.join(MODELS_DIR, "face_scrfd_500m.onnx"), SESSION_OPTS);
+    } catch (e) {
+      faceSession = null;
+      console.warn("[detector] face model not loaded, blur falls back to head-box heuristic:", e.message);
+    }
+    inputName = {
+      ppe: ppeSession.inputNames[0],
+      person: personSession.inputNames[0],
+      face: faceSession ? faceSession.inputNames[0] : null
+    };
 
     // warm-up: allocate everything now, with a blank gray frame
     tensorData.fill(PAD);
     const t = new ort.Tensor("float32", tensorData, [1, 3, SIZE, SIZE]);
     await ppeSession.run({ [inputName.ppe]: t });
     await personSession.run({ [inputName.person]: t });
+    if (faceSession) await faceSession.run({ [inputName.face]: faceNorm(t) });
 
     ready = true;
     console.log(`[detector] models loaded + warmed in ${Date.now() - t0} ms`);
@@ -302,7 +411,11 @@ export function status() {
   return {
     ready,
     error: loadError ? String(loadError.message || loadError) : null,
-    models: { ppe: "ppe_hat_vest_nano.onnx", person: "person_yolov8n.onnx" },
+    models: {
+      ppe: "ppe_hat_vest_nano.onnx",
+      person: "person_yolov8n.onnx",
+      face: faceSession ? "face_scrfd_500m.onnx" : null
+    },
     classes: ["Person", ...PPE_CLASSES],
     config: { ppeConf: CONFIG.ppeConf, personConf: CONFIG.personConf, iou: CONFIG.iou }
   };
@@ -346,10 +459,20 @@ export function detect(buffer, checks = {}) {
     const raw = [...personDets, ...ppeDets];
     const summary = evaluate(raw, rules);
 
+    // real face boxes (SCRFD) for the privacy blur; heuristic head boxes only as a fallback
+    let faces;
+    if (faceSession) {
+      const faceOut = await faceSession.run({ [inputName.face]: faceNorm(tensor) });
+      faces = collectFaces(decodeFaces(faceOut, geo, 0.2), raw, geo);
+      for (const o of Object.values(faceOut)) o.dispose?.();
+    } else {
+      faces = headRegions(raw, geo);
+    }
+
     return {
       raw_detections: raw,
       violations: summary.violations,
-      faces: headRegions(raw, geo),
+      faces,
       summary: { people: summary.people, hard_hats: summary.hats, vests: summary.vests },
       meta: {
         inference_ms: Date.now() - tInf,
