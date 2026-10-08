@@ -50,6 +50,7 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
   const [cameraId, setCameraId] = useState("");
   const [nowT, setNowT] = useState(0);
   const [notified, setNotified] = useState(null);
+  const [loggedTo, setLoggedTo] = useState(null);
 
   useEffect(() => () => mediaUrl && URL.revokeObjectURL(mediaUrl), [mediaUrl]);
 
@@ -63,6 +64,7 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
     setStatus("idle");
     setError(null);
     setNotified(null);
+    setLoggedTo(null);
     setNowT(0);
   }
 
@@ -90,7 +92,10 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
   async function sendFrame(blob, opts = {}) {
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
-        return await api.analyzeImage(blob, opts.cameraId, { skipDownscale: true });
+        return await api.analyzeImage(blob, opts.cameraId, {
+          skipDownscale: opts.skipDownscale ?? true,
+          sourceLabel: opts.label
+        });
       } catch (err) {
         if (/busy|many requests/i.test(err.message) && attempt < 3) {
           await sleep(1500 * (attempt + 1));
@@ -108,9 +113,14 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
     setError(null);
     setSamples([]);
     setNotified(null);
+    setLoggedTo(null);
     const results = [];
-    let bestBlob = null;
+    let bestBlob = null; // frame with the most violations -> shown on the chosen camera
     let bestScore = -1;
+    let bestT = 0;
+    let fallbackBlob = null; // used when nothing was flagged: the frame with the most people
+    let fallbackScore = -1;
+    let fallbackT = 0;
 
     try {
       if (kind === "image") {
@@ -118,7 +128,6 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
         const r = await sendFrame(file);
         results.push({ t: 0, ...r });
         bestBlob = file;
-        bestScore = r.violations?.length || 0;
         setProgress({ done: 1, total: 1 });
       } else {
         // decode the video in the browser and send sampled frames — no video upload,
@@ -156,6 +165,13 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
           if ((r.violations?.length || 0) > 0 && score > bestScore) {
             bestScore = score;
             bestBlob = blob;
+            bestT = times[i];
+          }
+          const people = r.summary?.people || 0;
+          if (people > fallbackScore) {
+            fallbackScore = people;
+            fallbackBlob = blob;
+            fallbackT = times[i];
           }
           setSamples([...results]);
           setProgress({ done: i + 1, total: times.length });
@@ -170,12 +186,23 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
       // ---- after-analysis actions (best effort, never fail the analysis) ----
       const critical = results.flatMap((s) => s.violations || []).filter((x) => x.severity === "critical");
       const flagged = results.filter((s) => s.violations?.length);
-      if (cameraId && bestBlob && flagged.length) {
-        try {
-          await sendFrame(bestBlob, { cameraId });
-          onLogged?.();
-        } catch {
-          /* ignore */
+      // "Log violations to <camera>": send the best frame again with the camera id. The server
+      // stores it as that camera's feed, so the dashboard + Live cameras show it with its boxes.
+      if (cameraId) {
+        const blob = bestBlob || fallbackBlob || (kind === "image" ? file : null);
+        const t = bestBlob ? bestT : fallbackT;
+        if (blob) {
+          try {
+            await sendFrame(blob, {
+              cameraId,
+              skipDownscale: kind !== "image",
+              label: kind === "video" ? `${file.name} @ ${fmt(t)}` : file.name
+            });
+            setLoggedTo(cameras.find((c) => c.id === cameraId)?.name || cameraId);
+            onLogged?.();
+          } catch (e) {
+            setError(`Analysis finished, but showing it on the camera failed: ${e.message}`);
+          }
         }
       }
       if (critical.length) {
@@ -411,7 +438,7 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
             </button>
             {cameras.length > 0 && (
               <label className="ml-auto flex items-center gap-1.5 text-[11px] text-slate-500">
-                Log violations to
+                Show result on camera
                 <select
                   value={cameraId}
                   onChange={(e) => setCameraId(e.target.value)}
@@ -475,6 +502,11 @@ export default function VideoAnalyzer({ cameras = [], blurFaces = false, onLogge
                   {stats.noVest > 0 && ` · no vest in ${stats.noVest} frame${stats.noVest > 1 ? "s" : ""}`}
                   {stats.compliance != null && ` · ${stats.compliance}% of frames with people fully compliant`}
                 </p>
+                {loggedTo && (
+                  <p className="text-slate-400 mt-0.5">
+                    Now shown on <b>{loggedTo}</b> (Dashboard + Live cameras). Use "restore" on the tile to go back.
+                  </p>
+                )}
                 {notified?.sent && <p className="text-slate-400 mt-0.5">LINE notification sent.</p>}
               </div>
             </div>

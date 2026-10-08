@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { listCameras, getCamera, addDetection } from "../data/store.js";
-import { scanAllCameras } from "../services/cameraScanner.js";
+import { listCameras, getCamera, addDetection, getCameraSource, clearCameraSource } from "../data/store.js";
+import { scanAllCameras, scanCamera } from "../services/cameraScanner.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 
 const router = Router();
@@ -14,6 +14,21 @@ router.get("/", (req, res) => {
 router.post("/scan", rateLimit({ windowMs: 60_000, max: 6, name: "scan" }), async (req, res) => {
   const result = await scanAllCameras();
   res.json({ ...result, cameras: listCameras() });
+});
+
+// GET /api/cameras/:id/source — the user-uploaded frame shown on this camera (JPEG)
+router.get("/:id/source", (req, res) => {
+  const src = getCameraSource(req.params.id);
+  if (!src) return res.status(404).json({ error: "No custom media on this camera" });
+  res.set({ "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=300" });
+  res.send(src.jpeg);
+});
+
+// DELETE /api/cameras/:id/source — go back to the default feed and re-analyse it
+router.delete("/:id/source", async (req, res) => {
+  if (!clearCameraSource(req.params.id)) return res.status(404).json({ error: "Camera not found" });
+  await scanCamera(req.params.id).catch((e) => console.error("[cameras] rescan failed:", e.message));
+  res.json(getCamera(req.params.id));
 });
 
 // GET /api/cameras/:id — single camera detail

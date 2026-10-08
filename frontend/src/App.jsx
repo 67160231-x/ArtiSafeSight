@@ -188,7 +188,7 @@ export default function App() {
 
               <div className="mt-6 flex flex-col xl:flex-row gap-4 items-start">
                 <div className="flex-1 min-w-0">
-                  <CameraGrid cameras={cameras} loading={loading} blurFaces={settings.blur} />
+                  <CameraGrid cameras={cameras} loading={loading} blurFaces={settings.blur} onRefresh={loadAll} />
                 </div>
                 <AlertsPanel alerts={alerts} onAcknowledge={handleAcknowledge} onNavigate={setActive} />
               </div>

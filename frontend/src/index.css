@@ -84,5 +84,5 @@ body {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   background: rgba(120, 130, 140, 0.25);
-  border-radius: 9999px;
+  border-radius: 22%;
 }

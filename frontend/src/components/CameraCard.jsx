@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import { RotateCcw, Paperclip } from "lucide-react";
+import { api } from "../api.js";
 import DetectionImage from "./DetectionImage.jsx";
 
 const SEVERITY_STYLES = {
@@ -7,14 +10,50 @@ const SEVERITY_STYLES = {
   low: { border: "border-alert-low", text: "text-alert-low", bg: "bg-alert-low" }
 };
 
-export default function CameraCard({ camera, blurFaces = false }) {
+const BLANK = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
+
+export default function CameraCard({ camera, blurFaces = false, onRestore }) {
+  // A user-uploaded image / video frame can replace the default feed ("Log violations to...")
+  const [customUrl, setCustomUrl] = useState(null);
+  const [restoring, setRestoring] = useState(false);
+  useEffect(() => {
+    if (!camera.sourceVersion) {
+      setCustomUrl(null);
+      return;
+    }
+    let cancelled = false;
+    let url = null;
+    api
+      .getCameraSource(camera.id)
+      .then((blob) => {
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setCustomUrl(url);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [camera.id, camera.sourceVersion]);
+
+  async function restore() {
+    setRestoring(true);
+    try {
+      await api.restoreCamera(camera.id);
+      await onRestore?.();
+    } finally {
+      setRestoring(false);
+    }
+  }
+
   const hasAlerts = camera.detections.length > 0;
   const isClear = camera.status === "clear";
 
   return (
     <div className="group relative rounded-xl overflow-hidden border border-base-700/60 bg-base-900">
       <DetectionImage
-        src={`/cameras/${camera.image}`}
+        src={camera.sourceVersion ? customUrl || BLANK : `/cameras/${camera.image}`}
         alt={camera.name}
         width={camera.imageWidth}
         height={camera.imageHeight}
@@ -85,6 +124,20 @@ export default function CameraCard({ camera, blurFaces = false }) {
         <div>
           <p className="text-sm font-medium text-slate-200">{camera.name}</p>
           <p className="text-[11px] text-slate-500">{camera.zone}</p>
+          {camera.sourceLabel && (
+            <p className="mt-1 flex items-center gap-1 text-[10px] text-cyan-accent">
+              <Paperclip size={10} />
+              <span className="max-w-[160px] truncate">{camera.sourceLabel}</span>
+              <button
+                onClick={restore}
+                disabled={restoring}
+                title="Back to the default camera feed"
+                className="ml-1 flex items-center gap-0.5 text-slate-500 hover:text-slate-300 disabled:opacity-50"
+              >
+                <RotateCcw size={10} /> restore
+              </button>
+            </p>
+          )}
         </div>
         {hasAlerts ? (
           <span className="text-[10px] font-medium text-alert-critical bg-alert-critical/15 rounded-full px-2 py-1">

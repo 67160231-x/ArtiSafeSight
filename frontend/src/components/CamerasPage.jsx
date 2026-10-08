@@ -78,7 +78,7 @@ export default function CamerasPage({ cameras, loading, onRefresh, blurFaces = f
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filtered.map((camera) => (
-              <CameraCard key={camera.id} camera={camera} blurFaces={blurFaces} />
+              <CameraCard key={camera.id} camera={camera} blurFaces={blurFaces} onRestore={onRefresh} />
             ))}
           </div>
         )}

@@ -64,6 +64,16 @@ export const api = {
   updateSettings: (patch) =>
     request("/settings", { method: "PUT", body: JSON.stringify(patch) }),
   scanCameras: () => request("/cameras/scan", { method: "POST" }),
+  restoreCamera: (id) => request(`/cameras/${id}/source`, { method: "DELETE" }),
+  // custom frame shown on a camera tile (needs the auth header, so fetch -> blob)
+  getCameraSource: async (id) => {
+    const token = localStorage.getItem("token");
+    const res = await fetch(`${BASE}/cameras/${id}/source`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (!res.ok) throw new Error("No custom media");
+    return res.blob();
+  },
   notifyViolation: (payload) =>
     request("/alerts/notify", { method: "POST", body: JSON.stringify(payload) }),
   testLine: () => request("/settings/line-test", { method: "POST" }),
@@ -71,7 +81,10 @@ export const api = {
     const token = localStorage.getItem("token");
     const form = new FormData();
     form.append("image", opts.skipDownscale ? file : await downscaleImage(file), "frame.jpg");
-    if (cameraId) form.append("cameraId", cameraId);
+    if (cameraId) {
+      form.append("cameraId", cameraId);
+      if (opts.sourceLabel) form.append("sourceLabel", opts.sourceLabel);
+    }
     const res = await fetch(`${BASE}/detect`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},

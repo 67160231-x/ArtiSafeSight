@@ -1,7 +1,8 @@
 import { Router } from "express";
 import multer from "multer";
 import { detect, status, BusyError } from "../services/detector.js";
-import { addDetection, getCamera, getSettings } from "../data/store.js";
+import sharp from "sharp";
+import { applyScan, setCameraSource, getCamera, getSettings } from "../data/store.js";
 import { rateLimit } from "../middleware/rateLimit.js";
 
 const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 8);
@@ -46,10 +47,26 @@ router.post("/", rateLimit({ windowMs: 60_000, max: Number(process.env.DETECT_RA
   try {
     const result = await detect(req.file.buffer, { hardhat: s.hardhat, vest: s.vest });
 
+    // "Log violations to <camera>": the uploaded image / best video frame REPLACES that camera's
+    // feed on the dashboard and Live cameras, together with its detections and alerts.
     if (cameraId) {
-      for (const v of result.violations) addDetection(cameraId, v);
+      const { data, info } = await sharp(req.file.buffer, { limitInputPixels: 40_000_000 })
+        .rotate()
+        .resize(960, 960, { fit: "inside" })
+        .jpeg({ quality: 80 })
+        .toBuffer({ resolveWithObject: true });
+      const label = String(req.body?.sourceLabel || "Uploaded media").slice(0, 80);
+      setCameraSource(cameraId, data, label);
+      applyScan(cameraId, {
+        violations: result.violations,
+        summary: result.summary,
+        faces: result.faces,
+        imageWidth: info.width,
+        imageHeight: info.height,
+        source: "upload"
+      });
     }
-    res.json({ modelReady: true, ...result });
+    res.json({ modelReady: true, logged: Boolean(cameraId), ...result });
   } catch (err) {
     if (err instanceof BusyError) {
       res.set("Retry-After", "3");

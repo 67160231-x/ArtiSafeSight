@@ -3,7 +3,7 @@ import path from "path";
 import sharp from "sharp";
 import { fileURLToPath } from "url";
 import { detect, status as detectorStatus } from "./detector.js";
-import { cameraDefs, applyScan, getSettings } from "../data/store.js";
+import { cameraDefs, applyScan, getSettings, getCameraSource } from "../data/store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS = path.join(__dirname, "..", "assets", "cameras");
@@ -11,8 +11,9 @@ const ASSETS = path.join(__dirname, "..", "assets", "cameras");
 let scanning = null; // in-flight promise, so concurrent callers share one scan
 
 async function scanOne(def) {
-  const file = path.join(ASSETS, path.basename(def.image));
-  const buf = await fs.readFile(file);
+  // a user-uploaded image/video frame replaces the default camera frame
+  const custom = getCameraSource(def.id);
+  const buf = custom ? custom.jpeg : await fs.readFile(path.join(ASSETS, path.basename(def.image)));
   const meta = await sharp(buf).metadata();
   const s = getSettings();
   const result = await detect(buf, { hardhat: s.hardhat, vest: s.vest });
@@ -21,9 +22,18 @@ async function scanOne(def) {
     summary: result.summary,
     faces: result.faces,
     imageWidth: meta.width,
-    imageHeight: meta.height
+    imageHeight: meta.height,
+    source: custom ? "upload" : "scan"
   });
   return result.violations.length;
+}
+
+/** Re-scan a single camera (used when its custom media is removed). */
+export async function scanCamera(cameraId) {
+  const def = cameraDefs.find((d) => d.id === cameraId);
+  if (!def || !detectorStatus().ready) return false;
+  await scanOne(def);
+  return true;
 }
 
 /** Run the model over every camera frame (sequentially: memory-friendly). */

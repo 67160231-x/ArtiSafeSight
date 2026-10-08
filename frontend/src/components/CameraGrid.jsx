@@ -12,7 +12,7 @@ function matchesFilter(camera, filter) {
   return true;
 }
 
-export default function CameraGrid({ cameras, loading, blurFaces = false }) {
+export default function CameraGrid({ cameras, loading, blurFaces = false, onRefresh }) {
   const [view, setView] = useState("grid"); // "grid" | "list"
   const [filter, setFilter] = useState("All");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -98,7 +98,7 @@ export default function CameraGrid({ cameras, loading, blurFaces = false }) {
       ) : view === "grid" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {filtered.map((camera) => (
-            <CameraCard key={camera.id} camera={camera} blurFaces={blurFaces} />
+            <CameraCard key={camera.id} camera={camera} blurFaces={blurFaces} onRestore={onRefresh} />
           ))}
         </div>
       ) : (

@@ -227,17 +227,52 @@ function evaluate(detections, checks) {
   return { people: people.length, hats: hats.length, vests: vests.length, violations };
 }
 
-// Head/face regions (used by the "blur worker faces" privacy setting). Same idea as the
-// friend's detect_blur.py: the top ~22% of every person box, trimmed a little at the sides.
-function headRegions(detections) {
+// Head/face regions for the "blur worker faces" privacy setting.
+// The friend's detect_blur.py blurs a fixed 25% strip at the top of every person box. That
+// misses faces in close-ups (head is ~40% of a waist-up box), so here the head size is
+// derived from the person's WIDTH (shoulders ≈ 2 head-widths), clamped to 20-50% of the box,
+// and refined with the Hard_hat box when one is found on that person.
+function headRegions(detections, geo) {
+  const aspect = geo.nw / geo.nh; // frame width / height
+  const hats = detections.filter((d) => d.label === "Hard_hat");
+  const clamp = (v) => Math.max(0, Math.min(100, v));
+  const round = (v) => Math.round(v * 10) / 10;
+
   return detections
     .filter((d) => d.label === "Person" && d.box.h >= 8)
-    .map((p) => ({
-      x: Math.round((p.box.x + p.box.w * 0.12) * 10) / 10,
-      y: Math.round(p.box.y * 10) / 10,
-      w: Math.round(p.box.w * 0.76 * 10) / 10,
-      h: Math.round(p.box.h * 0.22 * 10) / 10
-    }));
+    .map((p) => {
+      const b = p.box;
+      // head height in % of frame height, head width in % of frame width
+      const headH = Math.min(Math.max(b.w * aspect * 0.62, b.h * 0.22), b.h * 0.5);
+      const headW = Math.min(b.w, (headH * 0.95) / aspect);
+      const cx = b.x + b.w / 2;
+      let x1 = cx - headW / 2;
+      let x2 = cx + headW / 2;
+      let y1 = b.y;
+      let y2 = b.y + headH;
+
+      const hat = hats.find((h) => {
+        const hx = h.box.x + h.box.w / 2;
+        const hy = h.box.y + h.box.h / 2;
+        return hx >= b.x && hx <= b.x + b.w && hy >= b.y - 0.12 * b.h && hy <= b.y + 0.45 * b.h;
+      });
+      if (hat) {
+        // hat covers roughly the top half of the head -> the face ends ~1.9 hat-heights down
+        x1 = Math.min(x1, hat.box.x - hat.box.w * 0.1);
+        x2 = Math.max(x2, hat.box.x + hat.box.w * 1.1);
+        y1 = Math.min(y1, hat.box.y);
+        y2 = Math.max(y2, hat.box.y + hat.box.h * 1.9);
+      }
+
+      // 12% safety margin around the head, kept inside the frame
+      const padX = (x2 - x1) * 0.12;
+      const padY = (y2 - y1) * 0.12;
+      x1 = clamp(x1 - padX);
+      x2 = clamp(x2 + padX);
+      y1 = clamp(y1 - padY);
+      y2 = clamp(y2 + padY);
+      return { x: round(x1), y: round(y1), w: round(x2 - x1), h: round(y2 - y1) };
+    });
 }
 
 // ---------- public API ----------
@@ -314,7 +349,7 @@ export function detect(buffer, checks = {}) {
     return {
       raw_detections: raw,
       violations: summary.violations,
-      faces: headRegions(raw),
+      faces: headRegions(raw, geo),
       summary: { people: summary.people, hard_hats: summary.hats, vests: summary.vests },
       meta: {
         inference_ms: Date.now() - tInf,

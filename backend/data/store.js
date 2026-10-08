@@ -27,8 +27,14 @@ let cameras = CAMERA_DEFS.map((d) => ({
   imageHeight: null,
   people: 0,
   faces: [],
+  sourceLabel: null,
+  sourceVersion: null,
   detections: []
 }));
+
+// Media a user chose to show on a camera tile (instead of the default frame).
+// Only the best frame is kept, as a small JPEG (~100-200 KB), in memory.
+const sources = new Map(); // cameraId -> { jpeg: Buffer, label, version }
 
 let alerts = [];
 let seq = 0;
@@ -72,15 +78,15 @@ function pushAlert(camera, { label, severity }, source, acknowledged = false) {
 }
 
 /** Store the result of running the model on a camera frame. */
-export function applyScan(cameraId, { violations, summary, faces, imageWidth, imageHeight }) {
+export function applyScan(cameraId, { violations, summary, faces, imageWidth, imageHeight, source = "scan" }) {
   const camera = getCamera(cameraId);
   if (!camera) return null;
 
   // keep "acknowledged" if the same violation type was already acknowledged
   const ackedTitles = new Set(
-    alerts.filter((a) => a.cameraId === cameraId && a.source === "scan" && a.acknowledged).map((a) => a.title)
+    alerts.filter((a) => a.cameraId === cameraId && a.acknowledged).map((a) => a.title)
   );
-  alerts = alerts.filter((a) => !(a.cameraId === cameraId && a.source === "scan"));
+  alerts = alerts.filter((a) => a.cameraId !== cameraId);
 
   camera.detections = violations.map((v) => ({ id: nextId("d"), ...v }));
   camera.status = violations.length > 0 ? "live" : "clear";
@@ -96,7 +102,7 @@ export function applyScan(cameraId, { violations, summary, faces, imageWidth, im
   for (const v of violations) {
     if (seen.has(v.label)) continue;
     seen.add(v.label);
-    pushAlert(camera, v, "scan", ackedTitles.has(v.label));
+    pushAlert(camera, v, source, ackedTitles.has(v.label));
   }
   // newest first
   alerts.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
@@ -152,4 +158,27 @@ export function getSettings() {
 export function updateSettings(patch) {
   settings = { ...settings, ...patch };
   return settings;
+}
+
+export function setCameraSource(cameraId, jpeg, label) {
+  const camera = getCamera(cameraId);
+  if (!camera) return null;
+  const version = Date.now();
+  sources.set(cameraId, { jpeg, label: label || "Uploaded media", version });
+  camera.sourceLabel = label || "Uploaded media";
+  camera.sourceVersion = version;
+  return camera;
+}
+
+export function clearCameraSource(cameraId) {
+  const camera = getCamera(cameraId);
+  if (!camera) return null;
+  sources.delete(cameraId);
+  camera.sourceLabel = null;
+  camera.sourceVersion = null;
+  return camera;
+}
+
+export function getCameraSource(cameraId) {
+  return sources.get(cameraId) || null;
 }
